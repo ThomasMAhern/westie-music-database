@@ -80,6 +80,8 @@ from utils.tables import Playlist, PlaylistOwner, PlaylistTrack, Stats, Track, T
 # COMMON UTILITIES #
 ####################
 
+type TextFilter = str | list[str]
+
 
 class PreFilterOptions(NamedTuple):
     sort_by: str
@@ -217,11 +219,14 @@ class PlaylistFilter:
     """Playlist-specific filters."""
 
     # User-provided parameters
-    country: str | list[str] = ''
-    dj_name: str = ''
-    dj_name_exclude: str = ''
-    playlist_include: str = ''
-    playlist_exclude: str = ''
+    country: TextFilter = ''
+    dj_name: TextFilter = ''
+    dj_name_exclude: TextFilter = ''
+    playlist_include: TextFilter = ''
+    playlist_exclude: TextFilter = ''
+    playlist_is_social_set: bool = False
+    min_song_count: int | None = None
+    max_song_count: int | None = None
 
     # Parsed filters
     match_country: pl.Expr = field(init=False)
@@ -256,11 +261,16 @@ class PlaylistFilter:
             or self.match_dj_name_exclude is not None\
             or self.match_country is not None\
             or self.match_playlist is not None\
-            or self.match_excluded_playlist is not None
+            or self.match_excluded_playlist is not None\
+            or self.playlist_is_social_set
 
     def filter_playlists(self, playlists: PlaylistSet, *, include_matched_terms: bool) -> PlaylistSet:
         """Filter the specified playlists to only include playlists matching this filter."""
         matching_playlists = playlists.included_playlists
+
+        if self.playlist_is_social_set:
+            matching_playlists = matching_playlists.filter(
+                pl.col(Playlist.is_social_set))
 
         if self.match_playlist is not None:
             matching_playlists = matching_playlists.filter(
@@ -278,6 +288,14 @@ class PlaylistFilter:
         if self.match_dj_name_exclude is not None:
             matching_playlists = matching_playlists.filter(
                 ~self.match_dj_name_exclude)
+
+        if self.min_song_count is not None:
+            matching_playlists = matching_playlists.filter(
+                Stats.song_count().ge(self.min_song_count))
+
+        if self.max_song_count is not None:
+            matching_playlists = matching_playlists.filter(
+                Stats.song_count().le(self.max_song_count))
 
         # Courtesy of Tobias N. (for the suggestion of the playlist_exclude filter)
         excluded_playlists: pl.LazyFrame | None
@@ -530,7 +548,9 @@ class TrackSet:
                          pl.col(Track.id).n_unique().alias(Playlist.matching_song_count))
 
             matching_playlists = playlists.included_playlists\
-                .join(aggregated_tracks_per_playlist, how='inner', on=Playlist.id)
+                .join(aggregated_tracks_per_playlist, how='inner', on=Playlist.id)\
+                .with_columns((Playlist.matching_song_count() / Stats.song_count())
+                              .alias(Playlist.matching_song_percent))
         else:
             matching_playlists = playlists.included_playlists.join(
                 playlist_tracks.included_playlist_tracks.join(
@@ -550,10 +570,10 @@ class TrackFilter:
     """"Track-specific filters."""
 
     # User-provided parameters
-    song_name: str = ''
+    song_name: TextFilter = ''
     song_bpm_range: tuple[int, int] | None = None
     song_release_date: str = ''
-    artist_name: str = ''
+    artist_name: TextFilter = ''
     artist_is_queer: bool = False
     artist_is_poc: bool = False
 
@@ -656,8 +676,8 @@ class TrackLyricsFilter:
     """Lyrics-specific filters."""
 
     # User-provided parameters
-    lyrics_include: str = ''
-    lyrics_exclude: str = ''
+    lyrics_include: TextFilter = ''
+    lyrics_exclude: TextFilter = ''
     lyrics_limit: int | None = None
 
     # Parsed filters
@@ -999,6 +1019,7 @@ type TrackSortKey = Literal[
 type PlaylistSortKey = Literal[
     'hit_count',
     'matching_song_count',
+    'matching_song_percent',
     'song_count',
     'artist_count',
 ]
@@ -1095,11 +1116,11 @@ class SearchEngine:
         song_name: str = '',
         song_bpm_range: tuple[int, int] | None = None,
         song_release_date: str = '',
-        artist_name: str = '',
+        artist_name: TextFilter = '',
         artist_is_queer: bool = False,
         artist_is_poc: bool = False,
-        lyrics_include: str = '',
-        lyrics_exclude: str = '',
+        lyrics_include: TextFilter = '',
+        lyrics_exclude: TextFilter = '',
         lyrics_limit: int | None = None,
         lyrics_in_result: bool = False,
         #
@@ -1209,10 +1230,12 @@ class SearchEngine:
         #
         # Playlist-specific filters
         #
-        country: str = '',
-        dj_name: str = '',
-        playlist_include: str = '',
-        playlist_exclude: str = '',
+        country: TextFilter = '',
+        dj_name: TextFilter = '',
+        playlist_include: TextFilter = '',
+        playlist_exclude: TextFilter = '',
+        min_song_count: int | None = None,
+        max_song_count: int | None = None,
         #
         # Result options
         #
@@ -1238,6 +1261,8 @@ class SearchEngine:
             dj_name=dj_name,
             playlist_include=playlist_include,
             playlist_exclude=playlist_exclude,
+            min_song_count=min_song_count,
+            max_song_count=max_song_count,
         )
 
         #####################
@@ -1269,8 +1294,8 @@ class SearchEngine:
     def find_djs(
         self,
         *,
-        dj_name: str = '',
-        playlist_name: str = '',
+        dj_name: TextFilter = '',
+        playlist_name: TextFilter = '',
         playlist_limit: int | None = 30,
         dj_limit: int | None = 100,
     ) -> pl.LazyFrame:
@@ -1319,8 +1344,8 @@ class SearchEngine:
         direction: Literal['any', 'prev', 'next'],
         *,
         return_pairs: bool = False,
-        song_name: str = '',
-        artist_name: str = '',
+        song_name: TextFilter = '',
+        artist_name: TextFilter = '',
         limit: int | None = 100,
     ) -> tuple[pl.LazyFrame, pl.LazyFrame]:
         """Returns the songs most often played before resp. after the specified song."""

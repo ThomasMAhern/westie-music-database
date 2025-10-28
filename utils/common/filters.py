@@ -1,4 +1,6 @@
 """Utility functions for parsing query parameters into polars filters."""
+from typing import Literal
+
 import polars as pl
 
 IntoExpr = str | list[str] | pl.Expr
@@ -24,7 +26,9 @@ def create_text_filter(
     filter_expression: str | list[str] | None,
     column: IntoExpr,
     *,
-    ascii_case_insensitive: bool = True
+    is_list_column: bool = False,
+    ascii_case_insensitive: bool = True,
+    match_mode: Literal['exact', 'contains'] = 'contains',
 ) -> pl.Expr | None:
     """Parse a filter expression for a text column."""
     if filter_expression is None:
@@ -45,12 +49,27 @@ def create_text_filter(
     if not values:
         return None
 
-    return into_expr(column).cast(pl.String).str.contains_any(values, ascii_case_insensitive=ascii_case_insensitive)
+    def is_match(expr: pl.Expr) -> pl.Expr:
+        if match_mode == 'contains':
+            return expr.cast(pl.String).str.contains_any(values, ascii_case_insensitive=ascii_case_insensitive)
+        elif match_mode == 'exact':
+            if ascii_case_insensitive:
+                return expr.cast(pl.String).str.to_lowercase().is_in(values)
+            else:
+                return expr.cast(pl.String).is_in(values)
+        else:
+            raise ValueError(f'Invalid match mode: {match_mode}')
+
+    if is_list_column:
+        return into_expr(column).list.eval(is_match(pl.element())).list.any()
+    else:
+        return is_match(into_expr(column))
 
 
-def create_date_filter(filter_expression: str, column: IntoExpr) -> pl.Expr | None:
+def create_date_filter(filter_expression: str, column: IntoExpr, *, is_list_column: bool = False) -> pl.Expr | None:
     """Parse a filter expression for a date column"""
     return create_text_filter(
         filter_expression,
         into_expr(column).dt.to_string(),
-        ascii_case_insensitive=False)
+        ascii_case_insensitive=False,
+        is_list_column=is_list_column)

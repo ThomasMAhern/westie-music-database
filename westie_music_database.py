@@ -16,13 +16,15 @@ pl.Config.set_tbl_rows(100).set_fmt_str_lengths(100)
 pl.enable_string_cache()  # for Categoricals
 # st.text(f"{avail_threads}")
 
-
-# Automatically pull the data from HuggingFace if we're running on
-# Streamlit Community Cloud, as it doesn't seem to provide a separate
-# customizable setup step.
-#
-# This step does nothing when run in a local environment.
-automatically_pull_data_if_needed()
+# Only check once per session
+if "pull_data" not in st.session_state or st.session_state["pull_data"]:
+    # Automatically pull the data from HuggingFace if we're running on
+    # Streamlit Community Cloud, as it doesn't seem to provide a separate
+    # customizable setup step.
+    #
+    # This step does nothing when run in a local environment.
+    automatically_pull_data_if_needed()
+    st.session_state["pull_data"] = False
 
 
 def just_a_peek(df_):
@@ -95,7 +97,8 @@ songs_count, artists_count, playlists_count, djs_count, lyrics_count = load_stat
 
 # st.write(f"Memory Usage: {psutil.virtual_memory().percent}%")
 st.markdown("## Westie Music Database:")
-st.text("An aggregated collection of West Coast Swing (WCS) music and playlists from DJs, Spotify users, etc. ") #byebye memory problems courtesy of Lukas W
+# byebye memory problems courtesy of Lukas W
+st.text("An aggregated collection of West Coast Swing (WCS) music and playlists from DJs, Spotify users, etc. ")
 
 # st.markdown('''468,348 **Songs** (160,661 wcs specific)
 # 124,957 **Artists** (53,789 wcs specific)
@@ -333,16 +336,6 @@ if song_locator_toggle:
         bpm_high = st.number_input(
             "Playlist high: ", value=100, min_value=0, step=2)
 
-    # if (song_input + artist_name + dj_input + ''.join(playlist_input) + ''.join(anti_playlist_input) +
-    #     ''.join(countries_selectbox) + ''.join(added_2_playlist_date) + ''.join(track_release_date)
-    #     ).strip() == 'this_is_a_bogus_value_to_hopefully_not_break_things' and num_results == 0 and not queer_toggle and bpm_slider[0]==0 and bpm_slider[1]==150:
-    #         # st.text('preloaded')
-    #         st.dataframe(top_songs,
-    #                          column_config={Track.url: st.column_config.LinkColumn()}
-    #                     )
-
-    # else:
-    # and (st.session_state["processing"] = False):
     if st.button("Search songs", type="primary", disabled=st.session_state["processing"]):
         st.session_state["processing"] = True
         log_query("Search songs", {'song_input': song_input,
@@ -420,7 +413,7 @@ if song_locator_toggle:
         #                         .with_columns(pl.col(Playlist.name).str.to_lowercase().str.split(' '))
         #                         .explode(Playlist.name)
         #                         .unique()
-        #                         .collect(streaming=True)
+        #                         .collect(engine='streaming')
         #                         [Playlist.name]
         #                         .to_list()
         #                         )
@@ -554,11 +547,15 @@ playlist_locator_toggle = st.toggle("Find a Playlist 💿")
 if playlist_locator_toggle:
     playlist_col1, playlist_col2 = st.columns(2)
     with playlist_col1:
-        song_input = st.text_input("Contains the song:")
+        song_and_artist_input = st.text_input("Contains the song (use `song|artist` to filter by artist):")
         playlist_input = st.text_input("Playlist name:")
     with playlist_col2:
         dj_input = st.text_input("DJ name:")
         anti_playlist_input2 = st.text_input("Not in playlist name: ")
+
+    song_and_artist_input = song_and_artist_input.split("|")
+    song_input = song_and_artist_input[0] if len(song_and_artist_input) > 0 else ''
+    artist_input = song_and_artist_input[1] if len(song_and_artist_input) > 1 else ''
 
     # if any(val for val in [playlist_input, song_input, dj_input]):
     if st.button("Search playlists", type="primary", disabled=st.session_state["processing"]):
@@ -572,7 +569,7 @@ if playlist_locator_toggle:
         # TODO: Expose additional query parameters in the UI
         playlist_search_df = search_engine.find_playlists(
             song_name=song_input,
-            # artist_name=...,
+            artist_name=artist_input,
             # country=...,
             dj_name=dj_input,
             playlist_include=playlist_input,
@@ -593,7 +590,7 @@ if playlist_locator_toggle:
                      .select(Playlist.name, Playlist.url, PlaylistOwner.name,
                              Playlist.matching_song_count, Stats.song_count,
                              Stats.artist_count, Track.name)
-                     .collect(streaming=True),
+                     .collect(engine='streaming'),
                      column_config={Playlist.url: st.column_config.LinkColumn()})
         st.session_state["processing"] = False
     st.markdown(f"#### ")
@@ -663,7 +660,7 @@ if search_dj_toggle:
             #         .with_columns(pl.col(PlaylistOwner.name).list.head(30))
             #         .sort(Stats.dj_count, Stats.playlist_count, descending=True)
             #         .head(200)
-            #         .collect(streaming=True),
+            #         .collect(engine='streaming'),
             #         column_config={Track.url: st.column_config.LinkColumn()})
         st.session_state["processing"] = False
 
@@ -673,7 +670,7 @@ if search_dj_toggle:
     #                  .cast(pl.String)
     #                  .unique()
     #                  .drop_nulls()
-    #                  .collect(streaming=True)
+    #                  .collect(engine='streaming')
     #                  [PlaylistOwner.name]
     #                  .to_list()
     #                  )
@@ -685,7 +682,7 @@ if search_dj_toggle:
     #                         dj_count = pl.n_unique(PlaylistOwner.name),
     #                         )
     #                 .sort(PlaylistOwner.name)
-    #                 .collect(streaming=True)
+    #                 .collect(engine='streaming')
     #         )
 
     # djs_selectbox = st.multiselect("Compare these DJ's music:", dj_list)
@@ -765,7 +762,7 @@ if geo_region_toggle:
                      .rename({'song_url': Track.url, 'owner.display_name': PlaylistOwner.name})
                      .sort(Stats.playlist_count, Stats.dj_count, descending=True))
 
-        st.dataframe(region_df.head(1000).collect(streaming=True),
+        st.dataframe(region_df.head(1000).collect(engine='streaming'),
                      column_config={Track.url: st.column_config.LinkColumn()})
 
     st.markdown(f"#### Comparing Countries' music:")
@@ -882,10 +879,6 @@ if lyrics_toggle:
     with lyrics_col2:
         artist_input = st.text_input("Artist:")
         anti_lyrics_input = st.text_input("Not in lyrics:")
-
-    if anti_lyrics_input == ['']:
-        anti_lyrics_input = [
-            'this_is_a_bogus_value_to_hopefully_not_break_things']
 
     if st.button("Search lyrics", type="primary", disabled=st.session_state["processing"]):
         st.session_state["processing"] = True
