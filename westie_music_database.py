@@ -260,10 +260,10 @@ def top_poc_songs():
         .collect(engine='streaming')
 
 
-top_songs_toggle = st.toggle("Top 100 WCS songs!")
+top_songs_toggle = st.toggle("Top Songs")
 if top_songs_toggle:
     top_songs = top_songs()
-    st.markdown(f"Top Song Lists")
+    st.markdown(f"Top 100 WCS songs!")
     st.link_button('Playlist of the top 100',
                    url='https://open.spotify.com/playlist/7f5hPmFnIPy7lcj8EXX90V')
 
