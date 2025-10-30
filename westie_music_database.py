@@ -263,7 +263,7 @@ def top_poc_songs():
 top_songs_toggle = st.toggle("Top 100 WCS songs!")
 if top_songs_toggle:
     top_songs = top_songs()
-    st.markdown(f"Top 100 WCS songs!")
+    st.markdown(f"Top Song Lists")
     st.link_button('Playlist of the top 100',
                    url='https://open.spotify.com/playlist/7f5hPmFnIPy7lcj8EXX90V')
 
